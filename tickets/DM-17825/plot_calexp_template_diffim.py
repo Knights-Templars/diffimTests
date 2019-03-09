@@ -1,3 +1,9 @@
+# This file can be imported into a jupyter notebook namespace by
+# %run -n -i "plot_calexp_template_diffim.py"
+# also has a functionality as a standalone script to produce reproducible figures
+# =========
+
+
 import os
 import numpy as np
 import pandas as pd
@@ -34,7 +40,9 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
     tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
 
     # Only get objects with validityEnd NULL because that means they are still valid
-    objTable = pd.read_sql_query('select diaObjectId, ra, decl, nDiaSources,                                   gPSFluxMean, validityEnd, flags from {0}                                   where validityEnd is NULL;'.format(tables['obj']), connection)
+    objTable = pd.read_sql_query('select diaObjectId, ra, decl, nDiaSources, '
+    'gPSFluxMean, validityEnd, flags from {0} where validityEnd is NULL;'.format(tables['obj']), connection)
+     
     return objTable
 # ---
 def defMiniRegion(objTable):
@@ -70,9 +78,12 @@ def plotMiniRegion(objTable, miniRegion, title=None):
 def load_sources(repo, obj, sqliteFile='association.db'):
     connection = sqlite3.connect(os.path.join(repo, sqliteFile))
     tables = {'obj': 'DiaObject', 'src': 'DiaSource', 'ccd': 'CcdVisit'}
-    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, ccdVisitId, midPointTai,                                  apFlux, psFlux, apFluxErr, psFluxErr, totFlux, totFluxErr, flags                                  from {1} where diaObjectId = {0};'.format(obj, tables['src']), connection)
+    srcTable = pd.read_sql_query('select diaSourceId, diaObjectId, ccdVisitId, midPointTai, apFlux,'
+        ' psFlux, apFluxErr, psFluxErr, totFlux, totFluxErr, flags '
+        'from {} where diaObjectId = ?'.format(tables['src']), connection, params=(obj, ))
     connection.close()
     return(srcTable)
+    
 # ---
 def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
                     plotAllCutouts=False, diffimType='deepDiff_differenceExp',pdfWriter=None):
@@ -257,7 +268,7 @@ def patchFinder(obj, objTable, templateButler, patchList):
         templateDataId = {'filter': 'g', 'tract': 0, 'patch': patch}
         templateImage = templateButler.get('deepCoadd', dataId=templateDataId)
         try:
-            cutout = templateImage.getCutout(centerSource, size)
+            templateImage.getCutout(centerSource, size)
         except:
             continue
         else:
@@ -266,7 +277,6 @@ def patchFinder(obj, objTable, templateButler, patchList):
             #print('object id:', obj)
             return templatePatch
             break
-
 
 # ==============
 
