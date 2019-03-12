@@ -45,7 +45,7 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
      
     return objTable
     
-def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None):
+def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None, cmap = 'gray'):
     # We need to determine the center of the miniregion and the exposure as 
     # cutout does not support cutting where the center point is out of the image
     p1 = lsst.geom.SpherePoint(155.3, -5.8, lsst.geom.degrees)
@@ -68,14 +68,15 @@ def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None):
     extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
     diffexpArray = diffexpCutout.getMaskedImage().getImage().getArray()
     diffexpNorm = ImageNormalize(diffexpArray, interval=ZScaleInterval(), stretch=AsinhStretch())
-    ax.imshow(diffexpArray.T[::-1,::-1], origin='lower', cmap='gray', norm=diffexpNorm, extent = extentR)
+    ax.imshow(diffexpArray.T[::-1,::-1], origin='lower', cmap=cmap, norm=diffexpNorm, extent = extentR)
     ax.set_xlim(plt_bbox.getMaxY()+1, plt_bbox.getMinY()-1)
     ax.set_ylim(plt_bbox.getMaxX()+1, plt_bbox.getMinX()-1)
     ax.grid(True)
-    ax.scatter(Tsources['y'],Tsources['x'],s=6, alpha=0.3, c=color)
+    ax.scatter(Tsources['y'],Tsources['x'],s=8, alpha=0.3, c='red')
 
 # ---
-def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deepDiff_differenceExp',pdfWriter=None):
+def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, 
+        diffimType='deepDiff_differenceExp',pdfWriter=None, Nmaxpanels=None):
     # Upper row repo1 diffims with srcTable1 detections
     # Lower row repo2 diffims with srcTable2 detections
     # Cutout is controlled by repo1
@@ -91,22 +92,27 @@ def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deep
     
     fig = None
     ccdVisitIds = list(ccdVisitIds[::-1])
-    ccdVisitIds = ccdVisitIds[:12]
+    if Nmaxpanels is not None:
+        ccdVisitIds = ccdVisitIds[:Nmaxpanels]
     n_panels = len(ccdVisitIds)
-    
-#    panel_idx = 1 # Panel index (all subplots across all figures that belong to one sci object)
+    panel_idx = 1 # Overall subplot panel index
 
     butler1 = dafPersist.Butler(repo1)
     butler2 = dafPersist.Butler(repo2)
     while len(ccdVisitIds) > 0:
         if fig is None:
-            fig = plt.figure(figsize=(10,10))            
-            fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, hspace=0.05, wspace=0.1)
+            print(fig_idx)
+            fig = plt.figure(figsize=(9,10))            
+            fig.subplots_adjust(left=0.05, right=0.98, top=0.94, 
+                bottom=0.04, hspace=0.05, wspace=0.1)
+            fig.suptitle('{} - {} of {}'.format(panel_idx, min(panel_idx+n_plots_per_fig - 1, n_panels),
+                n_panels))
 #            fig.suptitle('DIAObject {}; {}/{}'.format(obj,fig_idx,n_figs))
             fig_idx += 1  
             splot_idx = 1 # Subplot index within figure (first row only)
         
         ccdVisitId = ccdVisitIds.pop()
+
         # Upper row diffexp first repo
         
         ax = fig.add_subplot(2,n_plots_per_fig,splot_idx)
@@ -117,16 +123,16 @@ def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deep
         dataId = { 'visit': visit, 'ccdnum': ccd }
 
         diffexp = butler1.get(diffimType, dataId)
-        make_and_plot_one_cutout(ax, diffexp, T,color='blue')
-        ax.set_title('{visit} {ccd:02d}; {idx}/{n_panels}'.format(visit=visit, ccd= ccd, idx=splot_idx, n_panels=n_panels))
-        ax.get_xaxis().set_visible(False)
+        make_and_plot_one_cutout(ax, diffexp, T)
+        T2 = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
+        ax.set_title('{visit};{ccd:02d} $N_s$:{s1};{s2}'.format(visit=visit, ccd= ccd, s1=len(T), s2=len(T2)))
         
+        T = T2
         ax = fig.add_subplot(2,n_plots_per_fig,splot_idx+n_plots_per_fig)
-        T = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
         diffexp = butler2.get(diffimType, dataId)
-        make_and_plot_one_cutout(ax, diffexp, T,color='green')
+        make_and_plot_one_cutout(ax, diffexp, T,cmap='Blues_r')
         
-#        panel_idx += 1
+        panel_idx += 1
         splot_idx += 1
         
         if splot_idx > n_plots_per_fig:
@@ -176,7 +182,6 @@ def plot_diasources_compare(srcTable1, srcTable2, pdfWriter=None):
         T = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
         ax.scatter(T['ra'],T['decl'],s=4, alpha=0.5)
         ax.set_title('{visitccd}; {idx}/{n_panels}'.format(visitccd=ccdVisitId, idx=panel_idx, n_panels=n_panels))
-         
 
         panel_idx += 1
         splot_idx += 1
@@ -200,40 +205,32 @@ def main():
     matplotlib.use('Qt5Agg')
 
     cwpRepo = '/home/gkovacs/data/repo_DM-17825/ingested/rerun/proc_2019-02-21'
-    cwpTemplateRepo = '/home/gkovacs/data/repo_DM-17825/templates'
-#    my_dbName = '/home/gkovacs/data/repo_DM-17825/ingested/rerun/proc_2019-02-21/association.db'
-#    mrawls_dbName = '/home/gkovacs/data/repo_DM-17825/mrawls_cw_processed2/association.db'
+#    cwpTemplateRepo = '/home/gkovacs/data/repo_DM-17825/templates'
+    my_dbName = '/home/gkovacs/data/repo_DM-17825/ingested/rerun/proc_2019-02-21/association.db'
+    mrawls_dbName = '/home/gkovacs/data/repo_DM-17825/mrawls_cw_processed2/association.db'
+    mrawls_repo = '/home/gkovacs/data/repo_DM-17825/mrawls_cw_processed2'
 
-#    butlerCwp = dafPersist.Butler(cwpRepo)
-    butlerCwpTemplate = dafPersist.Butler(cwpTemplateRepo)
+    # Our processing
+    conn = sqlite3.connect(my_dbName)
+#    srcTable = Table.from_pandas(pd.read_sql_query('select * from  DiaSource '
+#                                                   'where decl < -5.6 and decl > -5.8'
+#                ' and ra > 155.2 and ra < 155.3 and flags = 0', conn))
+    srcTable = Table.from_pandas(pd.read_sql_query('select * from  DiaSource '
+                                                   'where decl < -5.6 and decl > -5.8'
+                ' and ra > 155.2 and ra < 155.3', conn))
 
-    patchList = ['10,8', '11,8', '12,8', '13,8',
-             '10,7', '11,7', '12,7', '13,7',
-             '10,9', '11,9', '12,9', '13,9',
-             '10,5', '11,5', '12,5', '13,5',
-             '10,6', '11,6', '12,6', '13,6',
-             '10,10', '11,10', '12,10', '13,10']
-             
-    cwpObjTable = loadAllPpdbObjects(cwpRepo)
-    cwpMiniRegion = defMiniRegion(cwpObjTable)
-    cwpMiniUnflagged = cwpMiniRegion & (cwpObjTable['flags'] == 0)
-    cwpObjList = list(cwpObjTable.loc[cwpMiniRegion, 'diaObjectId'])
-    cwpObjList.sort()
+    # Meredith's ppdb
 
-    # Find the patch that belongs to the mini region
-    patch = patchFinder(cwpObjTable.loc[cwpMiniUnflagged,'diaObjectId'].values[0],cwpObjTable,butlerCwpTemplate,patchList)
+    m_conn = sqlite3.connect(mrawls_dbName)
+#    m_srcTable = Table.from_pandas(pd.read_sql_query(
+#        'select * from DiaSource where decl < -5.6 and decl > -5.8'
+#                ' and ra > 155.2 and ra < 155.3 and flags = 0', m_conn))
+    m_srcTable = Table.from_pandas(pd.read_sql_query(
+        'select * from DiaSource where decl < -5.6 and decl > -5.8'
+                ' and ra > 155.2 and ra < 155.3', m_conn))
 
-    with PdfPages('proc_2019-02-21_diffims_mini.pdf') as W:
-        for obj in cwpObjList:
-            print(obj)
-            plot_images(cwpRepo,cwpTemplateRepo,obj,patch,cwpObjTable,plotAllCutouts=True,pdfWriter=W)
-
-    cwpObjList = list(cwpObjTable.loc[cwpMiniUnflagged, 'diaObjectId'])
-    cwpObjList.sort()
-    with PdfPages('proc_2019-02-21_diffims_mini_unflagged.pdf') as W:
-        for obj in cwpObjList:
-            print(obj)
-            plot_images(cwpRepo,cwpTemplateRepo,obj,patch,cwpObjTable,plotAllCutouts=True,pdfWriter=W)
+    with PdfPages('compare_det_sources_all_2019-03-12.pdf') as W:
+        plot_diasources_diffim(cwpRepo,mrawls_repo,srcTable,m_srcTable, pdfWriter=W)
 
 if __name__ == "__main__":
     main()
