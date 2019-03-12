@@ -45,6 +45,35 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
      
     return objTable
     
+def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None):
+    # We need to determine the center of the miniregion and the exposure as 
+    # cutout does not support cutting where the center point is out of the image
+    p1 = lsst.geom.SpherePoint(155.3, -5.8, lsst.geom.degrees)
+    p2 = lsst.geom.SpherePoint(155.2, -5.6, lsst.geom.degrees)
+    wcs = diffexp.getWcs()
+    img_point1 = wcs.skyToPixel(p1)
+    img_point2 = wcs.skyToPixel(p2)
+    img_bbox = lsst.geom.Box2D(img_point1,img_point2)
+    plt_bbox = lsst.geom.Box2I(img_bbox)
+    img_bbox.clip(lsst.geom.Box2D(diffexp.getBBox()))
+    center_point = wcs.pixelToSky(
+        0.5 * (img_bbox.getMinX()+img_bbox.getMaxX()), 
+        0.5 * (img_bbox.getMinY()+img_bbox.getMaxY()))
+    size = lsst.geom.Extent2I(img_bbox.getMaxX() - img_bbox.getMinX() + 1, 
+        img_bbox.getMaxY() - img_bbox.getMinY() + 1)
+    diffexpCutout = diffexp.getCutout(center_point, size);
+    
+    # The actual cutout pixel rounding may be a little bit different
+    bbox = diffexpCutout.getBBox()
+    extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
+    diffexpArray = diffexpCutout.getMaskedImage().getImage().getArray()
+    diffexpNorm = ImageNormalize(diffexpArray, interval=ZScaleInterval(), stretch=AsinhStretch())
+    ax.imshow(diffexpArray.T[::-1,::-1], origin='lower', cmap='gray', norm=diffexpNorm, extent = extentR)
+    ax.set_xlim(plt_bbox.getMaxY()+1, plt_bbox.getMinY()-1)
+    ax.set_ylim(plt_bbox.getMaxX()+1, plt_bbox.getMinX()-1)
+    ax.grid(True)
+    ax.scatter(Tsources['y'],Tsources['x'],s=6, alpha=0.3, c=color)
+
 # ---
 def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deepDiff_differenceExp',pdfWriter=None):
     # Upper row repo1 diffims with srcTable1 detections
@@ -62,26 +91,23 @@ def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deep
     
     fig = None
     ccdVisitIds = list(ccdVisitIds[::-1])
+    ccdVisitIds = ccdVisitIds[:12]
     n_panels = len(ccdVisitIds)
-
-    # Center of the mini region
-    centerMini = lsst.geom.SpherePoint(155.25, -5.7, lsst.geom.degrees)
-    size = lsst.geom.Extent2I(100, 100)
-
+    
 #    panel_idx = 1 # Panel index (all subplots across all figures that belong to one sci object)
 
     butler1 = dafPersist.Butler(repo1)
-#    butler2 = dafPersist.Butler(repo2)
+    butler2 = dafPersist.Butler(repo2)
     while len(ccdVisitIds) > 0:
         if fig is None:
-            fig = plt.figure(figsize=(11,6))            
-            fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, wspace=0.15)
+            fig = plt.figure(figsize=(10,10))            
+            fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, hspace=0.05, wspace=0.1)
 #            fig.suptitle('DIAObject {}; {}/{}'.format(obj,fig_idx,n_figs))
             fig_idx += 1  
             splot_idx = 1 # Subplot index within figure (first row only)
         
         ccdVisitId = ccdVisitIds.pop()
-        # Upper row calexp
+        # Upper row diffexp first repo
         
         ax = fig.add_subplot(2,n_plots_per_fig,splot_idx)
         T = srcTable1[srcTable1['ccdVisitId']==ccdVisitId]
@@ -89,30 +115,18 @@ def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, diffimType='deep
         visit = ccdVisitId // 100
         ccd = ccdVisitId % 100
         dataId = { 'visit': visit, 'ccdnum': ccd }
-        print (visit)
-        print (ccd)
-        print (T['x'])
-        print (T['y'])
-        print (T['ra'])
-        print (T['decl'])
-        
+
         diffexp = butler1.get(diffimType, dataId)
-        ax.set_title('{visit} {ccdnum:02d}'.format(**dataId))
-        diffexpCutout = diffexp.getCutout(centerMini, size);
-        bbox = diffexpCutout.getBBox()
-        extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
-        diffexpArray = diffexpCutout.getMaskedImage().getImage().getArray()
-        diffexpNorm = ImageNormalize(diffexpArray, interval=ZScaleInterval(), stretch=AsinhStretch())
-        ax.imshow(diffexpArray.T[::-1,::-1], origin='lower', cmap='gray', norm=calexpNorm, extent = extentR)
-        ax.grid(True)
-        ax.scatter(T['y'],T['x'],s=4, alpha=0.5)
+        make_and_plot_one_cutout(ax, diffexp, T,color='blue')
+        ax.set_title('{visit} {ccd:02d}; {idx}/{n_panels}'.format(visit=visit, ccd= ccd, idx=splot_idx, n_panels=n_panels))
+        ax.get_xaxis().set_visible(False)
         
+        ax = fig.add_subplot(2,n_plots_per_fig,splot_idx+n_plots_per_fig)
+        T = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
+        diffexp = butler2.get(diffimType, dataId)
+        make_and_plot_one_cutout(ax, diffexp, T,color='green')
         
-#        T = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
-#        ax.scatter(T['ra'],T['decl'],s=4, alpha=0.5)
-        ax.set_title('{visit} {ccd:02d}; {idx}/{n_panels}'.format(visit=visit, ccd= ccd, idx=panel_idx, n_panels=n_panels))
-         
-        panel_idx += 1
+#        panel_idx += 1
         splot_idx += 1
         
         if splot_idx > n_plots_per_fig:
