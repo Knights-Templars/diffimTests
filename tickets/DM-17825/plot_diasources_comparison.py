@@ -1,8 +1,8 @@
 # This file can be imported into a jupyter notebook namespace by
 # %run -n -i "plot_calexp_template_diffim.py"
-# also has a functionality as a standalone script to produce reproducible figures
-# =========
-
+# also has a functionality as a standalone script to produce reproducible figures.
+#
+# This file is part of DM-17825.
 
 import os
 import numpy as np
@@ -46,6 +46,7 @@ def loadAllPpdbObjects(repo, dbName='association.db'):
     return objTable
     
 def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None, cmap = 'gray'):
+    """Helper function for `plot_diasources_diffim`. """
     # We need to determine the center of the miniregion and the exposure as 
     # cutout does not support cutting where the center point is out of the image
     p1 = lsst.geom.SpherePoint(155.3, -5.8, lsst.geom.degrees)
@@ -74,68 +75,104 @@ def make_and_plot_one_cutout(ax, diffexp, Tsources, color=None, cmap = 'gray'):
     ax.grid(True)
     ax.scatter(Tsources['y'],Tsources['x'],s=8, alpha=0.3, c='red')
 
-# ---
+
 def plot_diasources_diffim(repo1, repo2,  srcTable1, srcTable2, 
-        diffimType='deepDiff_differenceExp',pdfWriter=None, Nmaxpanels=None):
+        diffimType='deepDiff_differenceExp',pdfWriter=None, Nmaxpanels=None, selectPanels=None):
+    """Plot `diffimType` images in two rows from repo1 and repo2, respectively, and mark source
+    x,y positions from srcTable1 and srcTable2.
+
+    Parameters
+    ----------
+    repo1, repo2 : `lsst.daf.persistence.Butler`
+        The two repositories.
+        
+    srcTable1, srcTable2 : `astropy.table.Table` or similar
+        Data tables with `ccdVisitId`, `x`, `y` columns of diasources. Must 
+        support filtering and unique operations by `ccdVisitId`.
+        
+    diffimType : `str`, optional
+        Butler data type of the images to plot.
+        
+    pdfWriter : `matplotlib.backends.backend_pdf.PdfPages`, optional
+        PDF document writer output instance. If present, `savefig()` is called for each figure
+        and then the figure is closed. Otherwise all figures are left open.
+    
+    Nmaxpanels : `int`, optional
+        The maximum number of figure panels to create. Return when reached. Default is unlimited.
+    
+    selectPanels : container of `int` that supports the `in` (membership) operator
+        If specified, only the given panel numbers are plotted, all other ones are skipped.
+    """
     # Upper row repo1 diffims with srcTable1 detections
     # Lower row repo2 diffims with srcTable2 detections
     # Cutout is controlled by repo1
     # Cutout is miniregion
     
     ccdVisitIds = np.unique(srcTable1['ccdVisitId'])
+    ccdVisitIds = list(ccdVisitIds[::-1])
+
+    butler1 = dafPersist.Butler(repo1)
+    butler2 = dafPersist.Butler(repo2)
     
-    n_plots_per_fig = 4
-    n_figs = len(ccdVisitIds) // 4
-    if len(ccdVisitIds) % 4 !=0:
+    n_plots_per_fig = 5 # Number of panel columns
+    n_figs = len(ccdVisitIds) // n_plots_per_fig # Total number of figures
+    if len(ccdVisitIds) % n_plots_per_fig !=0:
         n_figs += 1
     fig_idx = 1 # Figure index for title
     
     fig = None
-    ccdVisitIds = list(ccdVisitIds[::-1])
-    if Nmaxpanels is not None:
-        ccdVisitIds = ccdVisitIds[:Nmaxpanels]
     n_panels = len(ccdVisitIds)
     panel_idx = 1 # Overall subplot panel index
-
-    butler1 = dafPersist.Butler(repo1)
-    butler2 = dafPersist.Butler(repo2)
+    plotted_idx = 1 # Overall actually plotted panels for Nmaxpanels
+    splot_idx = 1 # Subplot index within figure (first row only)
     while len(ccdVisitIds) > 0:
-        if fig is None:
-            print(fig_idx)
-            fig = plt.figure(figsize=(9,10))            
-            fig.subplots_adjust(left=0.05, right=0.98, top=0.94, 
-                bottom=0.04, hspace=0.05, wspace=0.1)
-            fig.suptitle('{} - {} of {}'.format(panel_idx, min(panel_idx+n_plots_per_fig - 1, n_panels),
-                n_panels))
-#            fig.suptitle('DIAObject {}; {}/{}'.format(obj,fig_idx,n_figs))
-            fig_idx += 1  
-            splot_idx = 1 # Subplot index within figure (first row only)
-        
         ccdVisitId = ccdVisitIds.pop()
+        if selectPanels is None or panel_idx in selectPanels:
+            if fig is None:
+                print(fig_idx)
+                fig = plt.figure(figsize=(12.1,9))            
+                fig.subplots_adjust(left=0.05, right=0.93, top=0.94, 
+                    bottom=0.04, hspace=0.12, wspace=0.17)
+                fig.suptitle('{} - {} of {}'.format(panel_idx, min(panel_idx+n_plots_per_fig - 1, n_panels),
+                    n_panels))
+    #            fig.suptitle('DIAObject {}; {}/{}'.format(obj,fig_idx,n_figs))
+                fig_idx += 1  
+                splot_idx = 1 # Subplot index within figure (first row only)
+            
+            # Upper row diffexp first repo
+            
+            ax = fig.add_subplot(2,n_plots_per_fig,splot_idx)
+            T = srcTable1[srcTable1['ccdVisitId']==ccdVisitId]
 
-        # Upper row diffexp first repo
-        
-        ax = fig.add_subplot(2,n_plots_per_fig,splot_idx)
-        T = srcTable1[srcTable1['ccdVisitId']==ccdVisitId]
+            visit = ccdVisitId // 100
+            ccd = ccdVisitId % 100
+            dataId = { 'visit': visit, 'ccdnum': ccd }
 
-        visit = ccdVisitId // 100
-        ccd = ccdVisitId % 100
-        dataId = { 'visit': visit, 'ccdnum': ccd }
-
-        diffexp = butler1.get(diffimType, dataId)
-        make_and_plot_one_cutout(ax, diffexp, T)
-        T2 = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
-        ax.set_title('{visit};{ccd:02d} $N_s$:{s1};{s2}'.format(visit=visit, ccd= ccd, s1=len(T), s2=len(T2)))
+            diffexp = butler1.get(diffimType, dataId)
+            make_and_plot_one_cutout(ax, diffexp, T)
+            T2 = srcTable2[srcTable2['ccdVisitId']==ccdVisitId]
+            ax.set_title('{visit};{ccd:02d} $N_s$:{s1};{s2}'.format(visit=visit, ccd= ccd, s1=len(T), s2=len(T2)))
+            
+#            if splot_idx == n_plots_per_fig:
+#                ax2 = ax.twinx()    
+#                ax2.set_ylim(-5.8, -5.6)
+            
+            T = T2
+            ax = fig.add_subplot(2,n_plots_per_fig,splot_idx+n_plots_per_fig)
+            diffexp = butler2.get(diffimType, dataId)
+            make_and_plot_one_cutout(ax, diffexp, T,cmap='Blues_r')
+            
+#            if splot_idx == n_plots_per_fig:
+#                ax3 = ax.twiny()    
+#                ax3.set_xlim(155.3,  155.2)
         
-        T = T2
-        ax = fig.add_subplot(2,n_plots_per_fig,splot_idx+n_plots_per_fig)
-        diffexp = butler2.get(diffimType, dataId)
-        make_and_plot_one_cutout(ax, diffexp, T,cmap='Blues_r')
-        
+            splot_idx += 1
+            plotted_idx += 1
+            if Nmaxpanels is not None and plotted_idx > Nmaxpanels:
+                ccdVisitIds = []
         panel_idx += 1
-        splot_idx += 1
         
-        if splot_idx > n_plots_per_fig:
+        if splot_idx > n_plots_per_fig and fig is not None:
             if pdfWriter is not None:
                 pdfWriter.savefig(fig)
                 plt.close(fig)
@@ -198,9 +235,10 @@ def plot_diasources_compare(srcTable1, srcTable2, pdfWriter=None):
         
 
 
-# ==============
+# =============
 
 def main():
+    """Standalone script running case."""
     import matplotlib
     matplotlib.use('Qt5Agg')
 
@@ -212,24 +250,24 @@ def main():
 
     # Our processing
     conn = sqlite3.connect(my_dbName)
-#    srcTable = Table.from_pandas(pd.read_sql_query('select * from  DiaSource '
-#                                                   'where decl < -5.6 and decl > -5.8'
-#                ' and ra > 155.2 and ra < 155.3 and flags = 0', conn))
     srcTable = Table.from_pandas(pd.read_sql_query('select * from  DiaSource '
                                                    'where decl < -5.6 and decl > -5.8'
-                ' and ra > 155.2 and ra < 155.3', conn))
+                ' and ra > 155.2 and ra < 155.3 and flags = 0', conn))
+#    srcTable = Table.from_pandas(pd.read_sql_query('select * from  DiaSource '
+#                                                   'where decl < -5.6 and decl > -5.8'
+#                ' and ra > 155.2 and ra < 155.3', conn))
 
     # Meredith's ppdb
 
     m_conn = sqlite3.connect(mrawls_dbName)
-#    m_srcTable = Table.from_pandas(pd.read_sql_query(
-#        'select * from DiaSource where decl < -5.6 and decl > -5.8'
-#                ' and ra > 155.2 and ra < 155.3 and flags = 0', m_conn))
     m_srcTable = Table.from_pandas(pd.read_sql_query(
         'select * from DiaSource where decl < -5.6 and decl > -5.8'
-                ' and ra > 155.2 and ra < 155.3', m_conn))
+                ' and ra > 155.2 and ra < 155.3 and flags = 0', m_conn))
+#    m_srcTable = Table.from_pandas(pd.read_sql_query(
+#        'select * from DiaSource where decl < -5.6 and decl > -5.8'
+#                ' and ra > 155.2 and ra < 155.3', m_conn))
 
-    with PdfPages('compare_det_sources_all_2019-03-12.pdf') as W:
+    with PdfPages('compare_det_sources_unflagged_2019-03-12.pdf') as W:
         plot_diasources_diffim(cwpRepo,mrawls_repo,srcTable,m_srcTable, pdfWriter=W)
 
 if __name__ == "__main__":
