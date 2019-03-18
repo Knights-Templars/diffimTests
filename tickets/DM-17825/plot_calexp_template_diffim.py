@@ -83,33 +83,37 @@ def load_sources(repo, obj, sqliteFile='association.db'):
         'from {} where diaObjectId = ?'.format(tables['src']), connection, params=(obj, ))
     connection.close()
     return(srcTable)
+
+def get_dataIdDict(ccdVisitId):
+    return {'visit': ccdVisitId // 100, 'ccdnum': ccdVisitId % 100}
     
 # ---
 def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
                     plotAllCutouts=False, diffimType='deepDiff_differenceExp',pdfWriter=None):
-    sources = load_sources(repo, obj)
+    sources = Table.from_pandas(load_sources(repo, obj))
+    sources.sort(keys='ccdVisitId')
     
     ra = objTable.loc[objTable['diaObjectId'] == obj, 'ra']
     dec = objTable.loc[objTable['diaObjectId'] == obj, 'decl']
     flags = sources['flags']
-    dataIds = sources['ccdVisitId'].values  # these are ints
-    srcIds = list(sources['diaSourceId'].values)
-    dataIdDicts = []
-    for dataId in dataIds:
-        visit = dataId // 100
-        ccdnum = dataId % 100
-        dataIdDict = {'visit': visit, 'ccdnum': ccdnum}
-        dataIdDicts.append(dataIdDict)
+#    dataIds = sources['ccdVisitId'].values  # these are ints
+#    srcIds = list(sources['diaSourceId'].values)
+#    dataIdDicts = []
+#    for dataId in dataIds:
+#        visit = dataId // 100
+#        ccdnum = dataId % 100
+#        dataIdDict = {'visit': visit, 'ccdnum': ccdnum}
+#        dataIdDicts.append(dataIdDict)
     centerSource = lsst.geom.SpherePoint(ra, dec, lsst.geom.degrees)
     size = lsst.geom.Extent2I(100, 100)
-    
+  
 
     print('DIAObject ID:', obj)
     print('Flags:', flags)
     print('RA (deg):', ra.values)
     print('Dec (deg):', dec.values)
-    print('DIASource IDs:', sources['diaSourceId'].values)
-    print('Data IDs:', dataIdDicts)
+    print('DIASource IDs:', sources['diaSourceId'])
+    print('Data IDs:', sources['ccdVisitId'])
 
     fig=plt.figure(figsize=(10,4))
     fig.suptitle('DIAObject ID:{}'.format(obj))
@@ -122,7 +126,7 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
 #                      ls=':', marker='o', color='#2979C1')
 #         plt.ylabel('Difference Flux (nJy)', size=16)
 #     else:
-#         plt.errorbar(sources['midPointTai'], ources['totFlux']*1e9, yerr=sources['totFluxErr']*1e9,
+#         plt.errorbar(sources['midPointTai'], sources['totFlux']*1e9, yerr=sources['totFluxErr']*1e9,
 #                      ls=':', marker='o', color='#2979C1')
 #         plt.ylabel('Flux (nJy)', size=16)
 #     plt.gca().spines['top'].set_visible(False)
@@ -133,11 +137,12 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
     
     # processed image
     ax = fig.add_subplot(1,3,1)
-    fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, wspace=0.15)
+    fig.subplots_adjust(left=0.05, right=0.93, bottom=0.05, wspace=0.15)
     
+    dataIdDict = get_dataIdDict(sources['ccdVisitId'][cutoutIdx])
     butler = dafPersist.Butler(repo)
-    calexpFirst = butler.get('calexp', dataIdDicts[cutoutIdx])
-    ax.set_title('{visit} {ccdnum:02d}'.format(**dataIdDicts[cutoutIdx]))
+    calexpFirst = butler.get('calexp', dataIdDict)
+    ax.set_title('{visit} {ccdnum:02d}'.format(**dataIdDict))
     calexpCutout = calexpFirst.getCutout(centerSource, size);
     bbox = calexpCutout.getBBox()
     extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
@@ -164,34 +169,41 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
     # difference image
     ax = fig.add_subplot(1,3,3)
 
-    diffimFirst = butler.get(diffimType, dataIdDicts[cutoutIdx])
-    diffimCutout = diffimFirst.getCutout(centerSource, size)
-    bbox = diffimCutout.getBBox()
-    extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
-    diffimArray = diffimCutout.getMaskedImage().getImage().getArray()
-    diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=AsinhStretch())
+#    diffimFirst = butler.get(diffimType, dataIdDict)
+#    diffimCutout = diffimFirst.getCutout(centerSource, size)
+#    bbox = diffimCutout.getBBox()
+#    extentR = (bbox.getMaxY()+0.5, bbox.getMinY()-0.5, bbox.getMaxX()+0.5, bbox.getMinX()-0.5)
+#    diffimArray = diffimCutout.getMaskedImage().getImage().getArray()
+#    diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=AsinhStretch())
+#    
+#    ax.imshow(diffimArray.T[::-1,::-1], origin='lower', cmap='gray', norm=diffimNorm, extent = extentR)
+#    ax.grid(True)
+    vnums = np.arange(len(sources), dtype=int)
+#    ax.plot(vnums, sources['totFlux'], '.', color='black')
+    ax.errorbar(vnums, sources['totFlux'], yerr=sources['totFluxErr'], fmt='o', color='black')
+    ax2 = ax.twinx()
+    ax2.errorbar(vnums, sources['psFlux'], yerr=sources['psFluxErr'], fmt='x', color='blue')
+#    ax2.plot (vnums, sources['psFlux'], '.', color='blue')
     
-    ax.imshow(diffimArray.T[::-1,::-1], origin='lower', cmap='gray', norm=diffimNorm, extent = extentR)
-    ax.grid(True)
 
     if pdfWriter is not None:
         pdfWriter.savefig(fig)
         plt.close(fig)
     
     n_plots_per_fig = 4
-    n_figs = len(dataIdDicts) // 4
-    if len(dataIdDicts) % 4 !=0:
+    n_figs = len(sources) // 4
+    if len(sources) % 4 !=0:
         n_figs += 1
     fig_idx = 1
     
     if plotAllCutouts:
         fig = None
-        dataIdDicts.reverse()
-        srcIds.reverse()
-        n_panels = len(dataIdDicts)
+
+        n_panels = len(sources)
         panel_idx = 1
-        
-        while len(dataIdDicts) > 0:
+        i_source = 0
+        while i_source < len(sources):
+            row = sources[i_source]
             if fig is None:
                 fig = plt.figure(figsize=(10,5.5))            
                 fig.subplots_adjust(left=0.05, right=0.98, bottom=0.05, wspace=0.15, hspace=0.1)
@@ -199,8 +211,8 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
                 fig_idx += 1             
                 splot_idx = 1
             
-            dataIdDict = dataIdDicts.pop()
-            srcId = srcIds.pop()
+            dataIdDict = get_dataIdDict(row['ccdVisitId'])
+            srcId = row['diaSourceId']
             
             # Upper row calexp
             ax = fig.add_subplot(2,n_plots_per_fig,splot_idx)
@@ -213,6 +225,7 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
             calexpNorm = ImageNormalize(calexpArray, interval=ZScaleInterval(), stretch=AsinhStretch())
             ax.imshow(calexpArray.T[::-1,::-1], origin='lower', cmap='gray', norm=calexpNorm, extent = extentR)
             ax.get_xaxis().set_visible(False)
+            ax.text(0.1, 0.9, '{:.0f}'.format(row['totFlux']), transform=ax.transAxes, backgroundcolor='lightgrey')
 
             # Bottom row diffim
             ax = fig.add_subplot(2,n_plots_per_fig,splot_idx + n_plots_per_fig)
@@ -225,6 +238,7 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
             diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=AsinhStretch())
     
             ax.imshow(diffimArray.T[::-1,::-1], origin='lower', cmap='gray', norm=diffimNorm, extent = extentR)
+            ax.text(0.1, 0.9, '{:.0f}'.format(row['psFlux']), transform=ax.transAxes, backgroundcolor='lightsteelblue')
 
             panel_idx += 1
             splot_idx += 1
@@ -233,11 +247,14 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
                     pdfWriter.savefig(fig)
                     plt.close(fig)
                 fig = None
-                 
+            
+            i_source +=1 
+            
         if fig is not None and pdfWriter is not None:
             pdfWriter.savefig(fig)
             plt.close(fig)
             
+       
 #             diffim = butler.get(diffimType, dataId)
 #             diffimArray = diffim.getCutout(centerSource, size).getMaskedImage().getImage().getArray()
 #             diffimNorm = ImageNormalize(diffimArray, interval=ZScaleInterval(), stretch=SqrtStretch())
