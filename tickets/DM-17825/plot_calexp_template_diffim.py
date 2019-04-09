@@ -15,6 +15,7 @@ import astropy.units as u
 import matplotlib.pyplot as plt
 
 from astropy.table import Table
+import astropy.table
 from matplotlib.backends.backend_pdf import PdfPages
 
 
@@ -180,9 +181,16 @@ def plot_images(repo, templateRepo, obj, patch, objTable, cutoutIdx = 0,
 #    ax.grid(True)
     vnums = np.arange(len(sources), dtype=int)
 #    ax.plot(vnums, sources['totFlux'], '.', color='black')
-    ax.errorbar(vnums, sources['totFlux'], yerr=sources['totFluxErr'], fmt='o', color='black')
+    if isinstance(sources['totFlux'], astropy.table.MaskedColumn):
+        ax.errorbar(vnums, sources['totFlux'].filled(np.nan), yerr=sources['totFluxErr'].filled(np.nan), fmt='o', color='black')
+    else:
+        ax.errorbar(vnums, sources['totFlux'], yerr=sources['totFluxErr'], fmt='o', color='black')
     ax2 = ax.twinx()
-    ax2.errorbar(vnums, sources['psFlux'], yerr=sources['psFluxErr'], fmt='x', color='blue')
+    # Plotting gives error if all values are masked and fill_value 
+    if isinstance(sources['psFlux'], astropy.table.MaskedColumn):
+        ax2.errorbar(vnums, sources['psFlux'].filled(np.nan), yerr=sources['psFluxErr'].filled(np.nan), fmt='x', color='blue')
+    else:
+        ax2.errorbar(vnums, sources['psFlux'], yerr=sources['psFluxErr'], fmt='x', color='blue')
 #    ax2.plot (vnums, sources['psFlux'], '.', color='blue')
     
 
@@ -323,9 +331,10 @@ def main():
     cwpObjList.sort()
 
     # Find the patch that belongs to the mini region
-    patch = patchFinder(cwpObjTable.loc[cwpMiniUnflagged,'diaObjectId'].values[0],cwpObjTable,butlerCwpTemplate,patchList)
+    patch = patchFinder(cwpObjTable.loc[cwpMiniUnflagged,'diaObjectId'].values[0],
+        cwpObjTable,butlerCwpTemplate,patchList)
 
-    with PdfPages('proc_2019-02-21_diffims_mini.pdf') as W:
+    with PdfPages('proc_2019-02-21_diffims_mini_all.pdf') as W:
         for obj in cwpObjList:
             print(obj)
             plot_images(cwpRepo,cwpTemplateRepo,obj,patch,cwpObjTable,plotAllCutouts=True,pdfWriter=W)
